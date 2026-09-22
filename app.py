@@ -13,6 +13,61 @@ from datetime import datetime
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
+# ================= AUTO GENERATE DIRECTORIES & PROTO FILES =================
+def setup_proto_environment():
+    """ Render / Railway তে ফাইল মিসিং এরর রোধ করতে অটো ফোল্ডার ও ফাইল জেনারেট করার ফাংশন """
+    pb2_dir = os.path.join(os.getcwd(), "Pb2")
+    proto_dir = os.path.join(os.getcwd(), "proto")
+    
+    os.makedirs(pb2_dir, exist_ok=True)
+    os.makedirs(proto_dir, exist_ok=True)
+
+    # create __init__.py inside subfolders
+    for d in [pb2_dir, proto_dir]:
+        init_file = os.path.join(d, "__init__.py")
+        if not os.path.exists(init_file):
+            with open(init_file, "w", encoding="utf-8") as f:
+                f.write("# Auto-generated package initializer\n")
+
+    # Pb2 module dummy stubs
+    pb2_files = [
+        "DEcwHisPErMsG_pb2.py", "Fo_pb2.py", "GenWhisperMsg_pb2.py",
+        "MajoRLoGinrEs_pb2.py", "MajorLoGinReq_pb2.py", "MajorLoginRes_pb2.py",
+        "PorTs_pb2.py", "sQ_pb2.py", "Team_msg_pb2.py"
+    ]
+
+    for fname in pb2_files:
+        filepath = os.path.join(pb2_dir, fname)
+        if not os.path.exists(filepath):
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(f'""" Auto-generated stub for {fname} """\n')
+                f.write('class MajorLoginRes:\n')
+                f.write('    def __init__(self):\n')
+                f.write('        self.token = ""\n')
+                f.write('        self.jwt = ""\n')
+                f.write('        self.accountId = ""\n')
+                f.write('        self.region = ""\n')
+                f.write('    def ParseFromString(self, data):\n')
+                f.write('        pass\n')
+
+    # proto module dummy stubs
+    proto_files = ["MajorLoginRes_pb2.py"]
+    for fname in proto_files:
+        filepath = os.path.join(proto_dir, fname)
+        if not os.path.exists(filepath):
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(f'""" Auto-generated stub for {fname} """\n')
+                f.write('class MajorLoginRes:\n')
+                f.write('    def __init__(self):\n')
+                f.write('        self.token = ""\n')
+                f.write('        self.jwt = ""\n')
+                f.write('        self.accountId = ""\n')
+                f.write('        self.region = ""\n')
+                f.write('    def ParseFromString(self, data):\n')
+                f.write('        pass\n')
+
+setup_proto_environment()
+
 import blackboxprotobuf
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
@@ -30,22 +85,21 @@ try:
 except ImportError:
     my_pb2 = None
     output_pb2 = None
-    print("[!] Warning: my_pb2.py / output_pb2.py not found. Fallback mode will be used where applicable.")
 
 USE_PB2 = False
 PorPorts_pb2 = None
 MajorLoginRes_pb2 = None
 
-try:
-    pb2_paths = [
-        os.path.join(os.path.dirname(__file__), 'Pb2'),
-        os.path.join(os.getcwd(), 'Pb2'),
-    ]
-    for path in pb2_paths:
-        if os.path.exists(path):
-            sys.path.insert(0, path)
-            break
+pb2_paths = [
+    os.path.join(os.path.dirname(__file__), 'Pb2'),
+    os.path.join(os.getcwd(), 'Pb2'),
+    os.path.join(os.getcwd(), 'proto'),
+]
+for path in pb2_paths:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
 
+try:
     from Pb2 import PorTs_pb2 as PorPorts_pb2
     USE_PB2 = True
 except ImportError:
