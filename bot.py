@@ -38,7 +38,7 @@ except ImportError:
 
 
 # ================== CONFIG ==================
-BOT_TOKEN = "8738117900:AAGi6tdbagPRRp4D6BuO3PNxnfvT9gyjfio"
+BOT_TOKEN = "8738117900:AAGN7kNIkJPlSaL_nTkc763ILstVtP6K-XQ"
 ADMIN_IDS = [8128075446]
 DB_FILE = "bot_data.db"
 
