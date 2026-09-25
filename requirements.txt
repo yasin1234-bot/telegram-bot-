@@ -3,5 +3,6 @@ cfonts
 pycryptodome
 Pillow
 colorama
-readline
 pyreadline3
+python-telegram-bot
+protobuf
