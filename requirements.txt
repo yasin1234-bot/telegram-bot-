@@ -1,4 +1,7 @@
-python-telegram-bot>=20.0
-aiohttp>=3.8.0
-pycryptodome>=3.18.0
-blackboxprotobuf>=1.0.1
+requests
+cfonts
+pycryptodome
+Pillow
+colorama
+readline
+pyreadline3
